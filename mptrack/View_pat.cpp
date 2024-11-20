@@ -35,6 +35,9 @@
 
 #include <algorithm>
 
+//next include is just for debugging
+#include <iostream>
+
 
 OPENMPT_NAMESPACE_BEGIN
 
@@ -113,6 +116,10 @@ BEGIN_MESSAGE_MAP(CViewPattern, CModScrollView)
 	ON_COMMAND(ID_PATTERN_INTERPOLATE_EFFECT,	&CViewPattern::OnInterpolateEffect)
 	ON_COMMAND(ID_PATTERN_INTERPOLATE_NOTE,		&CViewPattern::OnInterpolateNote)
 	ON_COMMAND(ID_PATTERN_INTERPOLATE_INSTR,	&CViewPattern::OnInterpolateInstr)
+	ON_COMMAND(ID_PATTERN_RANDOMIZE_VOLUME,     &CViewPattern::OnRandomizeVolume)
+	ON_COMMAND(ID_PATTERN_RANDOMIZE_EFFECT,     &CViewPattern::OnRandomizeEffect)
+	/*ON_COMMAND(ID_PATTERN_RANDOMIZE_NOTE, &CViewPattern::OnInterpolateNote)
+	ON_COMMAND(ID_PATTERN_RANDOMIZE_INSTR, &CViewPattern::OnInterpolateInstr)*/
 	ON_COMMAND(ID_PATTERN_VISUALIZE_EFFECT,		&CViewPattern::OnVisualizeEffect)
 	ON_COMMAND(ID_GROW_SELECTION,				&CViewPattern::OnGrowSelection)
 	ON_COMMAND(ID_SHRINK_SELECTION,				&CViewPattern::OnShrinkSelection)
@@ -1506,6 +1513,7 @@ void CViewPattern::OnRButtonDown(UINT flags, CPoint pt)
 			if(BuildEditCtxMenu(hMenu, ih, modDoc))
 				AppendMenu(hMenu, MF_SEPARATOR, 0, _T(""));
 			bool addSeparator = BuildInterpolationCtxMenu(hMenu, ih);
+			addSeparator = BuildRandomizationCtxMenu(hMenu, ih);
 			addSeparator |= BuildTransposeCtxMenu(hMenu, ih);
 			if(addSeparator)
 				AppendMenu(hMenu, MF_SEPARATOR, 0, _T(""));
@@ -2707,6 +2715,507 @@ void CViewPattern::Interpolate(PatternCursor::Columns type)
 
 			default:
 				MPT_ASSERT(false);
+			}
+		}
+
+		changed = true;
+
+	}  //end for all channels where type is selected
+
+	if(changed)
+	{
+		SetModified(false);
+		InvalidatePattern(false);
+	}
+}
+
+/*
+	TODO: this is copied from PatternFindReplaceDlg.cpp, refactor this out of both classes
+*/
+class CRangeDlg : public CDialog
+{
+public:
+	enum DisplayMode
+	{
+		kDecimal,
+		kHex,
+		kNotes,
+	};
+	bool cancelled = false;
+protected:
+	CComboBox m_cbnMin, m_cbnMax;
+	int m_minVal, m_minDefault;
+	int m_maxVal, m_maxDefault;
+	DisplayMode m_displayMode;
+
+public:
+	CRangeDlg(CWnd *parent, int minVal, int minDefault, int maxVal, int maxDefault, DisplayMode displayMode)
+		: CDialog(IDD_RANDOMIZE_RANGE, parent)
+		, m_minVal(minVal)
+		, m_minDefault(minDefault)
+		, m_maxVal(maxVal)
+		, m_maxDefault(maxDefault)
+		, m_displayMode(displayMode)
+	{
+	}
+
+	int GetMinVal() const { return m_minVal; }
+	int GetMaxVal() const { return m_maxVal; }
+
+protected:
+	void DoDataExchange(CDataExchange *pDX) override
+	{
+		CDialog::DoDataExchange(pDX);
+		DDX_Control(pDX, IDC_COMBO1, m_cbnMin);
+		DDX_Control(pDX, IDC_COMBO2, m_cbnMax);
+	}
+
+	BOOL OnInitDialog() override
+	{
+		CDialog::OnInitDialog();
+
+		if(m_displayMode == kNotes)
+		{
+			AppendNotesToControl(m_cbnMin, static_cast<ModCommand::NOTE>(m_minVal), static_cast<ModCommand::NOTE>(m_maxVal));
+			AppendNotesToControl(m_cbnMax, static_cast<ModCommand::NOTE>(m_minVal), static_cast<ModCommand::NOTE>(m_maxVal));
+		} else
+		{
+			m_cbnMin.InitStorage(m_minVal - m_maxVal + 1, 4);
+			m_cbnMax.InitStorage(m_minVal - m_maxVal + 1, 4);
+			const TCHAR *formatString;
+			if(m_displayMode == kHex && m_maxVal <= 0x0F)
+				formatString = _T("%01X");
+			else if(m_displayMode == kHex)
+				formatString = _T("%02X");
+			else
+				formatString = _T("%d");
+			for(int i = m_minVal; i <= m_maxVal; i++)
+			{
+				TCHAR s[16];
+				wsprintf(s, formatString, i);
+				m_cbnMin.SetItemData(m_cbnMin.AddString(s), i);
+				m_cbnMax.SetItemData(m_cbnMax.AddString(s), i);
+			}
+		}
+		if(m_minDefault < m_minVal || m_minDefault > m_maxDefault)
+		{
+			m_minDefault = m_minVal;
+			m_maxDefault = m_maxVal;
+		}
+		m_cbnMin.SetCurSel(m_minDefault - m_minVal);
+		m_cbnMax.SetCurSel(m_maxDefault - m_minVal);
+
+		return TRUE;
+	}
+
+	void OnOK() override
+	{
+		CDialog::OnOK();
+		m_minVal = static_cast<int>(m_cbnMin.GetItemData(m_cbnMin.GetCurSel()));
+		m_maxVal = static_cast<int>(m_cbnMax.GetItemData(m_cbnMax.GetCurSel()));
+		if(m_maxVal < m_minVal)
+			std::swap(m_minVal, m_maxVal);
+	}
+
+	/*
+	void OnCancel() override
+	{
+		CDialog::OnCancel();
+	}
+	*/
+};
+
+
+void CViewPattern::Randomize(PatternCursor::Columns type)
+{
+	CSoundFile *sndFile = GetSoundFile();
+	if(sndFile == nullptr || !sndFile->Patterns.IsValidPat(m_nPattern) || !IsEditingEnabled())
+		return;
+
+	bool changed = false;
+	std::vector<CHANNELINDEX> validChans;
+
+	if(type == PatternCursor::effectColumn || type == PatternCursor::paramColumn)
+	{
+		std::vector<CHANNELINDEX> effectChans;
+		std::vector<CHANNELINDEX> paramChans;
+		ListChansWhereColSelected(PatternCursor::effectColumn, effectChans);
+		ListChansWhereColSelected(PatternCursor::paramColumn, paramChans);
+
+		validChans.resize(effectChans.size() + paramChans.size());
+		validChans.resize(std::set_union(effectChans.begin(), effectChans.end(), paramChans.begin(), paramChans.end(), validChans.begin()) - validChans.begin());
+	} else
+	{
+		ListChansWhereColSelected(type, validChans);
+	}
+
+	if(m_Selection.GetUpperLeft() == m_Selection.GetLowerRight() && !validChans.empty())
+	{
+		// No selection has been made: Interpolate between closest non-zero values in this column.
+		PatternRect sweepSelection;
+
+		switch(type)
+		{
+			case PatternCursor::noteColumn:
+				// Allow note-to-note interpolation only.
+				sweepSelection = SweepPattern(
+					[](const ModCommand &start)
+				{ return start.note != NOTE_NONE; },
+					[](const ModCommand &start, const ModCommand &end)
+				{ return start.IsNote() && end.IsNote(); });
+				break;
+			case PatternCursor::instrColumn:
+				// Allow interpolation between same instrument, as long as it's not a PC note.
+				sweepSelection = SweepPattern(
+					[](const ModCommand &start)
+				{ return start.instr != 0 && !start.IsPcNote(); },
+					[](const ModCommand &start, const ModCommand &end)
+				{ return end.instr == start.instr; });
+				break;
+			case PatternCursor::volumeColumn:
+				// Allow interpolation between same volume effect, as long as it's not a PC note.
+				sweepSelection = SweepPattern(
+					[](const ModCommand &start)
+				{ return start.volcmd != VOLCMD_NONE && !start.IsPcNote(); },
+					[](const ModCommand &start, const ModCommand &end)
+				{ return end.volcmd == start.volcmd && !end.IsPcNote(); });
+				break;
+			case PatternCursor::effectColumn:
+			case PatternCursor::paramColumn:
+				// Allow interpolation between same effect, or anything if it's a PC note.
+				sweepSelection = SweepPattern(
+					[](const ModCommand &start)
+				{ return start.command != CMD_NONE || start.IsPcNote(); },
+					[](const ModCommand &start, const ModCommand &end)
+				{ return (end.command == start.command || (start.IsNormalVolumeSlide() && end.IsNormalVolumeSlide()) || start.IsPcNote()) && (!start.IsPcNote() || end.IsPcNote()); });
+				break;
+		}
+
+		if(sweepSelection.GetNumRows() > 1)
+		{
+			// Found usable end and start commands: Extend selection.
+			SetCurSel(sweepSelection);
+		}
+	}
+
+	const ROWINDEX row0 = m_Selection.GetStartRow(), row1 = m_Selection.GetEndRow();
+
+	//for all channels where type is selected
+	for(auto nchn : validChans)
+	{
+		if(!IsInterpolationPossible(row0, row1, nchn, type))
+			continue;  //skip chans where interpolation isn't possible
+
+		if(!changed)  //ensure we save undo buffer only before any channels are interpolated
+		{
+			const char *description = "";
+			switch(type)
+			{
+				/*case PatternCursor::noteColumn:
+					description = "Randomize Note Column";
+					break;*/
+				/*case PatternCursor::instrColumn:
+					description = "Randomize Instrument Column";
+					break;*/
+				case PatternCursor::volumeColumn:
+					description = "Randomize Volume Column";
+					break;
+				case PatternCursor::effectColumn:
+				case PatternCursor::paramColumn:
+					description = "Randomize Effect Column";
+					break;
+			}
+			PrepareUndo(m_Selection, description);
+		}
+
+		bool doPCinterpolation = false;
+		bool isVolSlide = false;
+		int vsrc, vdest, vcmd = 0, verr = 0, distance = row1 - row0;
+
+		const ModCommand srcCmd = *sndFile->Patterns[m_nPattern].GetpModCommand(row0, nchn);
+		const ModCommand destCmd = *sndFile->Patterns[m_nPattern].GetpModCommand(row1, nchn);
+
+		ModCommand::NOTE PCnote = NOTE_NONE;
+		uint16 PCinst = 0, PCparam = 0;
+
+		int max = 0, min = 0;
+
+		/*
+			Insert range dialog code here, see if vsrc/vdest stuff is needed
+			this 
+		*/
+
+		switch(type)
+		{
+			case PatternCursor::noteColumn:
+				{
+					//TODO: get number of instruments/samples from module
+					CRangeDlg dlg(this, 0, 0, 128, 128, CRangeDlg::kNotes);
+					if(dlg.DoModal() == IDOK)
+					{
+						min = dlg.GetMinVal();
+						max = dlg.GetMaxVal();
+					} else
+					{
+						// TODO undo selection
+						return;
+					}
+					break;
+				}
+			case PatternCursor::instrColumn:
+				{
+					//TODO: get number of instruments/samples from module
+					CRangeDlg dlg(this, 0, 0, 128, 128, CRangeDlg::kDecimal);
+					if(dlg.DoModal() == IDOK)
+					{
+						min = dlg.GetMinVal();
+						max = dlg.GetMaxVal();
+					} else
+					{
+						// TODO undo selection
+						return;
+					}
+					break;
+				}
+			case PatternCursor::volumeColumn:
+				{
+					//TODO: make proper range if there is a volume effect
+					CRangeDlg dlg(this, 0, 0, 64, 64, CRangeDlg::kDecimal);
+					if(dlg.DoModal() == IDOK)
+					{
+						min = dlg.GetMinVal();
+						max = dlg.GetMaxVal();
+					} else
+					{
+						// TODO undo selection
+						return;
+					}
+					break;
+				}
+			case PatternCursor::paramColumn:
+				{
+					CRangeDlg dlg(this, 0, 0, 999, 999, CRangeDlg::kDecimal);
+					if(dlg.DoModal() == IDOK)
+					{
+						min = dlg.GetMinVal();
+						max = dlg.GetMaxVal();
+					} else
+					{
+						// TODO undo selection
+						return;
+					}
+					break;
+				}
+			case PatternCursor::effectColumn:
+				{
+					CRangeDlg dlg(this, 0, 0, 0xFF, 0xFF, CRangeDlg::kHex);
+					if(dlg.DoModal() == IDOK)
+					{
+						//std::cout << "ok" << std::endl;
+						min = dlg.GetMinVal();
+						max = dlg.GetMaxVal();
+					} else
+					{
+						//std::cout << "cancel or close" << std::endl;
+						// TODO undo selection
+						return;
+					}
+					break;
+				}
+			default:
+				MPT_ASSERT(false);
+				return;
+		}
+
+		switch(type)
+		{
+			case PatternCursor::noteColumn:
+				vsrc = srcCmd.note;
+				vdest = destCmd.note;
+				vcmd = srcCmd.instr;
+				verr = (distance * (NOTE_MAX - 1)) / NOTE_MAX;
+				if(srcCmd.note == NOTE_NONE)
+				{
+					vsrc = vdest;
+					vcmd = destCmd.note;
+				} else if(destCmd.note == NOTE_NONE)
+				{
+					vdest = vsrc;
+				}
+				break;
+
+			case PatternCursor::instrColumn:
+				vsrc = srcCmd.instr;
+				vdest = destCmd.instr;
+				verr = (distance * 63) / 128;
+				if(srcCmd.instr == 0)
+				{
+					vsrc = vdest;
+					vcmd = destCmd.instr;
+				} else if(destCmd.instr == 0)
+				{
+					vdest = vsrc;
+				}
+				break;
+
+			case PatternCursor::volumeColumn:
+				vsrc = srcCmd.vol;
+				vdest = destCmd.vol;
+				vcmd = srcCmd.volcmd;
+				verr = (distance * 63) / 128;
+				if(srcCmd.volcmd == VOLCMD_NONE)
+				{
+					vcmd = destCmd.volcmd;
+					if(vcmd == VOLCMD_VOLUME && srcCmd.IsNote() && srcCmd.instr)
+						vsrc = GetDefaultVolume(srcCmd);
+					else
+						vsrc = vdest;
+				} else if(destCmd.volcmd == VOLCMD_NONE)
+				{
+					if(vcmd == VOLCMD_VOLUME && destCmd.IsNote() && destCmd.instr)
+						vdest = GetDefaultVolume(srcCmd);
+					else
+						vdest = vsrc;
+				}
+				break;
+
+			case PatternCursor::paramColumn:
+			case PatternCursor::effectColumn:
+				if(srcCmd.IsPcNote() || destCmd.IsPcNote())
+				{
+					doPCinterpolation = true;
+					PCnote = (srcCmd.IsPcNote()) ? srcCmd.note : destCmd.note;
+					vsrc = srcCmd.GetValueEffectCol();
+					vdest = destCmd.GetValueEffectCol();
+					PCparam = srcCmd.GetValueVolCol();
+					if((PCparam == 0 && destCmd.IsPcNote()) || !srcCmd.IsPcNote())
+						PCparam = destCmd.GetValueVolCol();
+					PCinst = srcCmd.instr;
+					if(PCinst == 0)
+						PCinst = destCmd.instr;
+				} else
+				{
+					vsrc = srcCmd.param;
+					vdest = destCmd.param;
+					vcmd = srcCmd.command;
+					isVolSlide = srcCmd.IsNormalVolumeSlide();
+					if(srcCmd.command == CMD_NONE)
+					{
+						vsrc = vdest;
+						vcmd = destCmd.command;
+						isVolSlide = destCmd.IsNormalVolumeSlide();
+					} else if(destCmd.command == CMD_NONE)
+					{
+						vdest = vsrc;
+					}
+				}
+				verr = (distance * 63) / 128;
+				break;
+
+			default:
+				MPT_ASSERT(false);
+				return;
+		}
+
+		/*const int srcLo = (vsrc & 0x0F), destLo = (vdest & 0x0F);
+		const int srcHi = (vsrc >> 4), destHi = (vdest >> 4);
+		const int verrLo = (srcLo < destLo) ? verr : -verr;
+		const int verrHi = (srcHi < destHi) ? verr : -verr;
+
+		if(vdest < vsrc)
+			verr = -verr;*/
+
+		/*
+		* Create dialog window to specify range. Only has two parameters which are the same for
+		* each randomization option (max and min) but these have to have different upper bounds and
+		* different format for each type. for volume, it should be decimal number with two digits,
+		* for volume column effects it's at most 9, for 
+		*/
+
+		ModCommand *pcmd = sndFile->Patterns[m_nPattern].GetpModCommand(row0, nchn);
+
+		for(int i = 0; i <= distance; i++, pcmd += sndFile->GetNumChannels())
+		{
+			switch(type)
+			{
+				case PatternCursor::noteColumn:
+					if((pcmd->note == NOTE_NONE || pcmd->instr == vcmd) && !pcmd->IsPcNote())
+					{
+						int note = 
+						pcmd->note = static_cast<ModCommand::NOTE>(note);
+						if(pcmd->instr == 0)
+							pcmd->instr = static_cast<ModCommand::VOLCMD>(vcmd);
+					}
+					break;
+
+				case PatternCursor::instrColumn:
+					if(pcmd->instr == 0)
+					{
+						/*int instr = vsrc + ((vdest - vsrc) * i + verr) / distance;
+						pcmd->instr = static_cast<ModCommand::INSTR>(instr);*/
+
+						//todo: see if i can get the number of instruments/samples in the module from this file,
+						//but this will become somewhat irrelevant once i implement range dialog
+						uint32 vol = mpt::random<uint32>(theApp.PRNG()) % 64;
+						pcmd->instr = static_cast<ModCommand::VOL>(vol);
+
+					}
+					break;
+
+				case PatternCursor::volumeColumn:
+					if((pcmd->volcmd == VOLCMD_NONE || pcmd->volcmd == vcmd) && !pcmd->IsPcNote())
+					{
+						/*int vol = vsrc + ((vdest - vsrc) * i + verr) / distance;
+						pcmd->vol = static_cast<ModCommand::VOL>(vol);
+						pcmd->volcmd = static_cast<ModCommand::VOLCMD>(vcmd);*/
+						uint32 vol = mpt::random<uint32>(theApp.PRNG())%64;
+						pcmd->vol = static_cast<ModCommand::VOL>(vol);
+						pcmd->volcmd = static_cast<ModCommand::VOLCMD>(vcmd);
+					}
+					break;
+
+				case PatternCursor::effectColumn:
+					if(doPCinterpolation)
+					{  // With PC/PCs notes, copy PCs note and plug index to all rows where
+						// effect interpolation is done if no PC note with non-zero instrument is there.
+						//const uint16 val = static_cast<uint16>(vsrc + ((vdest - vsrc) * i + verr) / distance);
+						uint32 val;
+						if(!pcmd->IsPcNote() || pcmd->instr == 0)
+						{
+							pcmd->note = PCnote;
+							pcmd->instr = static_cast<ModCommand::INSTR>(PCinst);
+							val = mpt::random<uint32>(theApp.PRNG()) % 1000;
+						}
+						pcmd->SetValueVolCol(PCparam);
+						pcmd->SetValueEffectCol(val);
+					} else if(!pcmd->IsPcNote())
+					{
+						if((pcmd->command == CMD_NONE) || (pcmd->command == vcmd) || (pcmd->IsNormalVolumeSlide() && isVolSlide))
+						{
+							if(!isVolSlide || !pcmd->IsNormalVolumeSlide())
+								pcmd->command = static_cast<ModCommand::COMMAND>(vcmd);
+							int val;
+							if(!pcmd->CommandHasTwoNibbles())
+							{
+								//val = mpt::random<uint32>(theApp.PRNG()) % 256;
+								val = mpt::random<uint32>(theApp.PRNG()) % (max - min) + min;
+								/*const int valLo = srcLo + ((destLo - srcLo) * i + verrLo) / distance;
+								const int valHi = srcHi + ((destHi - srcHi) * i + verrHi) / distance;
+								val = (valLo & 0x0F) | ((valHi & 0x0F) << 4);*/
+
+							} else
+							{
+								int effectSecondNibble = (pcmd->param - pcmd->param % 16);
+								val = effectSecondNibble + mpt::random<uint32>(theApp.PRNG()) % 16;
+								/*val = vsrc + ((vdest - vsrc) * i + verr) / distance;*/
+							}
+							pcmd->param = static_cast<ModCommand::PARAM>(val);
+						}
+					}
+					break;
+
+				default:
+					MPT_ASSERT(false);
 			}
 		}
 
@@ -6622,8 +7131,44 @@ bool CViewPattern::BuildInterpolationCtxMenu(HMENU hMenu, CInputHandler *ih) con
 	return false;
 }
 
+bool CViewPattern::BuildRandomizationCtxMenu(HMENU hMenu, CInputHandler *ih) const
+{
+	const CSoundFile *sndFile = GetSoundFile();
+	const bool isPCNote = sndFile->Patterns.IsValidPat(m_nPattern) && sndFile->Patterns[m_nPattern].GetpModCommand(m_Selection.GetStartRow(), m_Selection.GetStartChannel())->IsPcNote();
+
+	HMENU subMenu = CreatePopupMenu();
+	bool addSeparator = false;
+	/*addSeparator |= BuildRandomizationCtxMenu(subMenu, PatternCursor::noteColumn, ih->GetKeyTextFromCommand(kcPatternRandomizeNote, _T("&Note Column")), ID_PATTERN_RANDOMIZE_NOTE);
+	addSeparator |= BuildRandomizationCtxMenu(subMenu, PatternCursor::instrColumn, ih->GetKeyTextFromCommand(kcPatternRandomizeInstr, isPCNote ? _T("&Plugin Column") : _T("&Instrument Column")), ID_PATTERN_RANDOMIZE_INSTR);*/
+	addSeparator |= BuildRandomizationCtxMenu(subMenu, PatternCursor::volumeColumn, ih->GetKeyTextFromCommand(kcPatternRandomizeVol, isPCNote ? _T("&Parameter Column") : _T("&Volume Column")), ID_PATTERN_RANDOMIZE_VOLUME);
+	addSeparator |= BuildRandomizationCtxMenu(subMenu, PatternCursor::effectColumn, ih->GetKeyTextFromCommand(kcPatternRandomizeEffect, isPCNote ? _T("&Value Column") : _T("&Effect Column")), ID_PATTERN_RANDOMIZE_EFFECT);
+	if(addSeparator || !(TrackerSettings::Instance().m_dwPatternSetup & PATTERN_OLDCTXMENUSTYLE))
+	{
+		AppendMenu(hMenu, MF_POPUP | (addSeparator ? 0 : MF_GRAYED), reinterpret_cast<UINT_PTR>(subMenu), _T("R&andomize..."));
+		return true;
+	}
+	return false;
+}
+
 
 bool CViewPattern::BuildInterpolationCtxMenu(HMENU hMenu, PatternCursor::Columns colType, CString label, UINT command) const
+{
+	bool addSeparator = IsInterpolationPossible(colType);
+	if(!addSeparator && colType == PatternCursor::effectColumn)
+	{
+		// Extend search to param column
+		addSeparator = IsInterpolationPossible(PatternCursor::paramColumn);
+	}
+
+	if(addSeparator || !(TrackerSettings::Instance().m_dwPatternSetup & PATTERN_OLDCTXMENUSTYLE))
+	{
+		AppendMenu(hMenu, MF_STRING | (addSeparator ? 0 : MF_GRAYED), command, label);
+	}
+
+	return addSeparator;
+}
+
+bool CViewPattern::BuildRandomizationCtxMenu(HMENU hMenu, PatternCursor::Columns colType, CString label, UINT command) const
 {
 	bool addSeparator = IsInterpolationPossible(colType);
 	if(!addSeparator && colType == PatternCursor::effectColumn)

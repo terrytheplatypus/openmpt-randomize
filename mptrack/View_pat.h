@@ -462,6 +462,8 @@ protected:
 	afx_msg void OnInterpolateEffect() { Interpolate(PatternCursor::effectColumn); }
 	afx_msg void OnInterpolateNote() { Interpolate(PatternCursor::noteColumn); }
 	afx_msg void OnInterpolateInstr() { Interpolate(PatternCursor::instrColumn); }
+	afx_msg void OnRandomizeVolume() { Randomize(PatternCursor::volumeColumn); }
+	afx_msg void OnRandomizeEffect() { Randomize(PatternCursor::effectColumn); }
 	afx_msg void OnVisualizeEffect();
 	afx_msg void OnTransposeUp() { TransposeSelection(1); }
 	afx_msg void OnTransposeDown() { TransposeSelection(-1); }
@@ -526,6 +528,8 @@ private:
 	bool BuildGrowShrinkCtxMenu(HMENU hMenu, CInputHandler *ih) const;
 	bool BuildInterpolationCtxMenu(HMENU hMenu, CInputHandler *ih) const;
 	bool BuildInterpolationCtxMenu(HMENU hMenu, PatternCursor::Columns colType, CString label, UINT command) const;
+	bool BuildRandomizationCtxMenu(HMENU hMenu, CInputHandler *ih) const;
+	bool BuildRandomizationCtxMenu(HMENU hMenu, PatternCursor::Columns colType, CString label, UINT command) const;
 	bool BuildEditCtxMenu(HMENU hMenu, CInputHandler *ih, CModDoc *pModDoc) const;
 	bool BuildVisFXCtxMenu(HMENU hMenu, CInputHandler *ih) const;
 	bool BuildTransposeCtxMenu(HMENU hMenu, CInputHandler *ih) const;
@@ -542,6 +546,7 @@ private:
 	bool IsInterpolationPossible(PatternCursor::Columns colType) const;
 	bool IsInterpolationPossible(ROWINDEX startRow, ROWINDEX endRow, CHANNELINDEX chan, PatternCursor::Columns colType) const;
 	void Interpolate(PatternCursor::Columns type);
+	void Randomize(PatternCursor::Columns type);
 	PatternRect SweepPattern(bool (*startCond)(const ModCommand &), bool (*endCond)(const ModCommand &, const ModCommand &)) const;
 
 	// Return true if recording live (i.e. editing while following playback).
