@@ -2993,22 +2993,31 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 					break;
 				}
 			case PatternCursor::paramColumn:
-				{
-					CRangeDlg dlg(this, 0, 0, 999, 999, CRangeDlg::kDecimal);
-					if(dlg.DoModal() == IDOK)
-					{
-						min = dlg.GetMinVal();
-						max = dlg.GetMaxVal();
-					} else
-					{
-						// TODO undo selection
-						return;
-					}
-					break;
-				}
+				//{
+				//	CRangeDlg dlg(this, 0, 0, 999, 999, CRangeDlg::kDecimal);
+				//	if(dlg.DoModal() == IDOK)
+				//	{
+				//		min = dlg.GetMinVal();
+				//		max = dlg.GetMaxVal();
+				//	} else
+				//	{
+				//		// TODO undo selection
+				//		return;
+				//	}
+				//	break;
+				//}
 			case PatternCursor::effectColumn:
 				{
-					CRangeDlg dlg(this, 0, 0, 0xFF, 0xFF, CRangeDlg::kHex);
+					/*CRangeDlg dlgParam(this, 0, 0, 0xFF, 0xFF, CRangeDlg::kHex);
+					CRangeDlg dlgEffect(this, 0, 0, 0xFF, 0xFF, CRangeDlg::kHex);*//*
+					if(!srcCmd.IsPcNote())*/
+					
+					bool isPCNote = srcCmd.IsPcNote();
+					int minBound = 0;
+					int maxBound = isPCNote ? 999 : 0xFF;
+					CRangeDlg::DisplayMode mode = isPCNote ? CRangeDlg::kDecimal : CRangeDlg::kHex;
+
+					CRangeDlg dlg(this, minBound, minBound, maxBound, maxBound, mode);
 					if(dlg.DoModal() == IDOK)
 					{
 						//std::cout << "ok" << std::endl;
