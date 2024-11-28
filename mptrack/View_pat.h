@@ -464,6 +464,8 @@ protected:
 	afx_msg void OnInterpolateInstr() { Interpolate(PatternCursor::instrColumn); }
 	afx_msg void OnRandomizeVolume() { Randomize(PatternCursor::volumeColumn); }
 	afx_msg void OnRandomizeEffect() { Randomize(PatternCursor::effectColumn); }
+	afx_msg void OnRandomizeNote() { Randomize(PatternCursor::noteColumn); }
+	afx_msg void OnRandomizeInstr() { Randomize(PatternCursor::instrColumn); }
 	afx_msg void OnVisualizeEffect();
 	afx_msg void OnTransposeUp() { TransposeSelection(1); }
 	afx_msg void OnTransposeDown() { TransposeSelection(-1); }
@@ -545,6 +547,8 @@ private:
 
 	bool IsInterpolationPossible(PatternCursor::Columns colType) const;
 	bool IsInterpolationPossible(ROWINDEX startRow, ROWINDEX endRow, CHANNELINDEX chan, PatternCursor::Columns colType) const;
+	bool IsRandomizationPossible(PatternCursor::Columns colType) const;
+	bool IsRandomizationPossible(ROWINDEX startRow, ROWINDEX endRow, CHANNELINDEX chan, PatternCursor::Columns colType) const;
 	void Interpolate(PatternCursor::Columns type);
 	void Randomize(PatternCursor::Columns type);
 	PatternRect SweepPattern(bool (*startCond)(const ModCommand &), bool (*endCond)(const ModCommand &, const ModCommand &)) const;

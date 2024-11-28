@@ -1296,6 +1296,8 @@
 #define ID_CONVERT_SUSTAIN_TO_NORMAL    44656
 #define ID_PATTERN_RANDOMIZE_VOLUME     44657
 #define ID_PATTERN_RANDOMIZE_EFFECT     44658
+#define ID_PATTERN_RANDOMIZE_NOTE       44659
+#define ID_PATTERN_RANDOMIZE_INSTR      44660
 
 // Next default values for new objects
 // 
@@ -1303,7 +1305,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_3D_CONTROLS                     1
 #define _APS_NEXT_RESOURCE_VALUE        544
-#define _APS_NEXT_COMMAND_VALUE         44657
+#define _APS_NEXT_COMMAND_VALUE         44661
 #define _APS_NEXT_CONTROL_VALUE         2518
 #define _APS_NEXT_SYMED_VALUE           901
 #endif

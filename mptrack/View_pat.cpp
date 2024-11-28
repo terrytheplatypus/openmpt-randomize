@@ -118,8 +118,8 @@ BEGIN_MESSAGE_MAP(CViewPattern, CModScrollView)
 	ON_COMMAND(ID_PATTERN_INTERPOLATE_INSTR,	&CViewPattern::OnInterpolateInstr)
 	ON_COMMAND(ID_PATTERN_RANDOMIZE_VOLUME,     &CViewPattern::OnRandomizeVolume)
 	ON_COMMAND(ID_PATTERN_RANDOMIZE_EFFECT,     &CViewPattern::OnRandomizeEffect)
-	/*ON_COMMAND(ID_PATTERN_RANDOMIZE_NOTE, &CViewPattern::OnInterpolateNote)
-	ON_COMMAND(ID_PATTERN_RANDOMIZE_INSTR, &CViewPattern::OnInterpolateInstr)*/
+	ON_COMMAND(ID_PATTERN_RANDOMIZE_NOTE,       &CViewPattern::OnRandomizeNote)
+	ON_COMMAND(ID_PATTERN_RANDOMIZE_INSTR,      &CViewPattern::OnRandomizeInstr)
 	ON_COMMAND(ID_PATTERN_VISUALIZE_EFFECT,		&CViewPattern::OnVisualizeEffect)
 	ON_COMMAND(ID_GROW_SELECTION,				&CViewPattern::OnGrowSelection)
 	ON_COMMAND(ID_SHRINK_SELECTION,				&CViewPattern::OnShrinkSelection)
@@ -2857,20 +2857,20 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 		switch(type)
 		{
 			case PatternCursor::noteColumn:
-				// Allow note-to-note interpolation only.
+				//TODO: is there a better way of doing this? (and the following commands where im just returning true)
 				sweepSelection = SweepPattern(
 					[](const ModCommand &start)
-				{ return start.note != NOTE_NONE; },
+				{ return true; },
 					[](const ModCommand &start, const ModCommand &end)
-				{ return start.IsNote() && end.IsNote(); });
+				{ return true; });
 				break;
 			case PatternCursor::instrColumn:
-				// Allow interpolation between same instrument, as long as it's not a PC note.
+				// Allow randomization, as long as it's not a PC note.
 				sweepSelection = SweepPattern(
 					[](const ModCommand &start)
-				{ return start.instr != 0 && !start.IsPcNote(); },
+				{ return !start.IsPcNote(); },
 					[](const ModCommand &start, const ModCommand &end)
-				{ return end.instr == start.instr; });
+				{ return true; });
 				break;
 			case PatternCursor::volumeColumn:
 				// Allow interpolation between same volume effect, as long as it's not a PC note.
@@ -2878,7 +2878,7 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 					[](const ModCommand &start)
 				{ return start.volcmd != VOLCMD_NONE && !start.IsPcNote(); },
 					[](const ModCommand &start, const ModCommand &end)
-				{ return end.volcmd == start.volcmd && !end.IsPcNote(); });
+				{ return !end.IsPcNote(); });
 				break;
 			case PatternCursor::effectColumn:
 			case PatternCursor::paramColumn:
@@ -2891,32 +2891,34 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 				break;
 		}
 
-		if(sweepSelection.GetNumRows() > 1)
-		{
+		/*if(sweepSelection.GetNumRows() > 1)
+		{*/
 			// Found usable end and start commands: Extend selection.
 			SetCurSel(sweepSelection);
-		}
+		//}
 	}
 
+	//randomization should never depend on last row, but you still need to know distance to loop over the selection
 	const ROWINDEX row0 = m_Selection.GetStartRow(), row1 = m_Selection.GetEndRow();
 
 	//for all channels where type is selected
 	for(auto nchn : validChans)
 	{
-		if(!IsInterpolationPossible(row0, row1, nchn, type))
-			continue;  //skip chans where interpolation isn't possible
+		//if(!IsInterpolationPossible(row0, row1, nchn, type))
+		//	continue;  //skip chans where interpolation isn't possible
 
-		if(!changed)  //ensure we save undo buffer only before any channels are interpolated
+
+		if(!changed)  //ensure we save undo buffer only before any channels are randomized
 		{
 			const char *description = "";
 			switch(type)
 			{
-				/*case PatternCursor::noteColumn:
+				case PatternCursor::noteColumn:
 					description = "Randomize Note Column";
-					break;*/
-				/*case PatternCursor::instrColumn:
+					break;
+				case PatternCursor::instrColumn:
 					description = "Randomize Instrument Column";
-					break;*/
+					break;
 				case PatternCursor::volumeColumn:
 					description = "Randomize Volume Column";
 					break;
@@ -2933,23 +2935,17 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 		int vsrc, vdest, vcmd = 0, verr = 0, distance = row1 - row0;
 
 		const ModCommand srcCmd = *sndFile->Patterns[m_nPattern].GetpModCommand(row0, nchn);
-		const ModCommand destCmd = *sndFile->Patterns[m_nPattern].GetpModCommand(row1, nchn);
 
 		ModCommand::NOTE PCnote = NOTE_NONE;
 		uint16 PCinst = 0, PCparam = 0;
 
 		int max = 0, min = 0;
 
-		/*
-			Insert range dialog code here, see if vsrc/vdest stuff is needed
-			this 
-		*/
-
 		switch(type)
 		{
 			case PatternCursor::noteColumn:
 				{
-					//TODO: get number of instruments/samples from module
+					
 					CRangeDlg dlg(this, 0, 0, 128, 128, CRangeDlg::kNotes);
 					if(dlg.DoModal() == IDOK)
 					{
@@ -2957,7 +2953,6 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 						max = dlg.GetMaxVal();
 					} else
 					{
-						// TODO undo selection
 						return;
 					}
 					break;
@@ -2965,14 +2960,13 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 			case PatternCursor::instrColumn:
 				{
 					//TODO: get number of instruments/samples from module
-					CRangeDlg dlg(this, 0, 0, 128, 128, CRangeDlg::kDecimal);
+					CRangeDlg dlg(this, 1, 1, 64, 64, CRangeDlg::kDecimal);
 					if(dlg.DoModal() == IDOK)
 					{
 						min = dlg.GetMinVal();
 						max = dlg.GetMaxVal();
 					} else
 					{
-						// TODO undo selection
 						return;
 					}
 					break;
@@ -2987,31 +2981,14 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 						max = dlg.GetMaxVal();
 					} else
 					{
-						// TODO undo selection
 						return;
 					}
 					break;
 				}
 			case PatternCursor::paramColumn:
-				//{
-				//	CRangeDlg dlg(this, 0, 0, 999, 999, CRangeDlg::kDecimal);
-				//	if(dlg.DoModal() == IDOK)
-				//	{
-				//		min = dlg.GetMinVal();
-				//		max = dlg.GetMaxVal();
-				//	} else
-				//	{
-				//		// TODO undo selection
-				//		return;
-				//	}
-				//	break;
-				//}
 			case PatternCursor::effectColumn:
 				{
-					/*CRangeDlg dlgParam(this, 0, 0, 0xFF, 0xFF, CRangeDlg::kHex);
-					CRangeDlg dlgEffect(this, 0, 0, 0xFF, 0xFF, CRangeDlg::kHex);*//*
-					if(!srcCmd.IsPcNote())*/
-					
+					//TODO: typing in numbers only works sorta well when there are two digit numbers
 					bool isPCNote = srcCmd.IsPcNote();
 					int minBound = 0;
 					int maxBound = isPCNote ? 999 : 0xFF;
@@ -3020,12 +2997,10 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 					CRangeDlg dlg(this, minBound, minBound, maxBound, maxBound, mode);
 					if(dlg.DoModal() == IDOK)
 					{
-						//std::cout << "ok" << std::endl;
 						min = dlg.GetMinVal();
 						max = dlg.GetMaxVal();
 					} else
 					{
-						//std::cout << "cancel or close" << std::endl;
 						// TODO undo selection
 						return;
 					}
@@ -3039,76 +3014,25 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 		switch(type)
 		{
 			case PatternCursor::noteColumn:
-				vsrc = srcCmd.note;
-				vdest = destCmd.note;
-				vcmd = srcCmd.instr;
-				verr = (distance * (NOTE_MAX - 1)) / NOTE_MAX;
-				if(srcCmd.note == NOTE_NONE)
-				{
-					vsrc = vdest;
-					vcmd = destCmd.note;
-				} else if(destCmd.note == NOTE_NONE)
-				{
-					vdest = vsrc;
-				}
-				break;
-
 			case PatternCursor::instrColumn:
-				vsrc = srcCmd.instr;
-				vdest = destCmd.instr;
-				verr = (distance * 63) / 128;
-				if(srcCmd.instr == 0)
-				{
-					vsrc = vdest;
-					vcmd = destCmd.instr;
-				} else if(destCmd.instr == 0)
-				{
-					vdest = vsrc;
-				}
-				break;
-
 			case PatternCursor::volumeColumn:
-				vsrc = srcCmd.vol;
-				vdest = destCmd.vol;
-				vcmd = srcCmd.volcmd;
-				verr = (distance * 63) / 128;
-				if(srcCmd.volcmd == VOLCMD_NONE)
-				{
-					vcmd = destCmd.volcmd;
-					if(vcmd == VOLCMD_VOLUME && srcCmd.IsNote() && srcCmd.instr)
-						vsrc = GetDefaultVolume(srcCmd);
-					else
-						vsrc = vdest;
-				} else if(destCmd.volcmd == VOLCMD_NONE)
-				{
-					if(vcmd == VOLCMD_VOLUME && destCmd.IsNote() && destCmd.instr)
-						vdest = GetDefaultVolume(srcCmd);
-					else
-						vdest = vsrc;
-				}
 				break;
 
 			case PatternCursor::paramColumn:
 			case PatternCursor::effectColumn:
-				if(srcCmd.IsPcNote() || destCmd.IsPcNote())
+				if(srcCmd.IsPcNote())
 				{
 					doPCinterpolation = true;
-					PCnote = (srcCmd.IsPcNote()) ? srcCmd.note : destCmd.note;
+					PCnote = srcCmd.note;
 					vsrc = srcCmd.GetValueEffectCol();
-					vdest = destCmd.GetValueEffectCol();
 					PCparam = srcCmd.GetValueVolCol();
-					if((PCparam == 0 && destCmd.IsPcNote()) || !srcCmd.IsPcNote())
-						PCparam = destCmd.GetValueVolCol();
 					PCinst = srcCmd.instr;
-					if(PCinst == 0)
-						PCinst = destCmd.instr;
 				} else
 				{
 					vsrc = srcCmd.param;
-					vdest = destCmd.param;
 					vcmd = srcCmd.command;
 					isVolSlide = srcCmd.IsNormalVolumeSlide();
-					if(srcCmd.command == CMD_NONE)
+					/*if(srcCmd.command == CMD_NONE)
 					{
 						vsrc = vdest;
 						vcmd = destCmd.command;
@@ -3116,7 +3040,7 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 					} else if(destCmd.command == CMD_NONE)
 					{
 						vdest = vsrc;
-					}
+					}*/
 				}
 				verr = (distance * 63) / 128;
 				break;
@@ -3150,7 +3074,7 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 				case PatternCursor::noteColumn:
 					if((pcmd->note == NOTE_NONE || pcmd->instr == vcmd) && !pcmd->IsPcNote())
 					{
-						int note = 
+						uint32 note = max!=min ? mpt::random<uint32>(theApp.PRNG()) % (max - min) + min : min;
 						pcmd->note = static_cast<ModCommand::NOTE>(note);
 						if(pcmd->instr == 0)
 							pcmd->instr = static_cast<ModCommand::VOLCMD>(vcmd);
@@ -3165,8 +3089,9 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 
 						//todo: see if i can get the number of instruments/samples in the module from this file,
 						//but this will become somewhat irrelevant once i implement range dialog
-						uint32 vol = mpt::random<uint32>(theApp.PRNG()) % 64;
-						pcmd->instr = static_cast<ModCommand::VOL>(vol);
+						//uint32 instr = mpt::random<uint32>(theApp.PRNG()) % 64;
+						uint32 instr = max != min ? mpt::random<uint32>(theApp.PRNG()) % (max - min) + min : min;
+						pcmd->instr = static_cast<ModCommand::VOL>(instr);
 
 					}
 					break;
@@ -3177,7 +3102,8 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 						/*int vol = vsrc + ((vdest - vsrc) * i + verr) / distance;
 						pcmd->vol = static_cast<ModCommand::VOL>(vol);
 						pcmd->volcmd = static_cast<ModCommand::VOLCMD>(vcmd);*/
-						uint32 vol = mpt::random<uint32>(theApp.PRNG())%64;
+						//uint32 vol = mpt::random<uint32>(theApp.PRNG())%64;
+						uint32 vol = max != min ? mpt::random<uint32>(theApp.PRNG()) % (max - min) + min : min;
 						pcmd->vol = static_cast<ModCommand::VOL>(vol);
 						pcmd->volcmd = static_cast<ModCommand::VOLCMD>(vcmd);
 					}
@@ -3189,12 +3115,12 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 						// effect interpolation is done if no PC note with non-zero instrument is there.
 						//const uint16 val = static_cast<uint16>(vsrc + ((vdest - vsrc) * i + verr) / distance);
 						uint32 val;
-						if(!pcmd->IsPcNote() || pcmd->instr == 0)
-						{
-							pcmd->note = PCnote;
-							pcmd->instr = static_cast<ModCommand::INSTR>(PCinst);
-							val = mpt::random<uint32>(theApp.PRNG()) % 1000;
-						}
+						/*if(pcmd->IsPcNote() || pcmd->instr == 0)
+						{*/
+						pcmd->note = PCnote;
+						pcmd->instr = static_cast<ModCommand::INSTR>(PCinst);
+						val = max != min ? mpt::random<uint32>(theApp.PRNG()) % (max - min) + min : min;
+						//}
 						pcmd->SetValueVolCol(PCparam);
 						pcmd->SetValueEffectCol(val);
 					} else if(!pcmd->IsPcNote())
@@ -3207,16 +3133,20 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 							if(!pcmd->CommandHasTwoNibbles())
 							{
 								//val = mpt::random<uint32>(theApp.PRNG()) % 256;
-								val = mpt::random<uint32>(theApp.PRNG()) % (max - min) + min;
+								val = max != min ? mpt::random<uint32>(theApp.PRNG()) % (max - min) + min : min;
 								/*const int valLo = srcLo + ((destLo - srcLo) * i + verrLo) / distance;
 								const int valHi = srcHi + ((destHi - srcHi) * i + verrHi) / distance;
 								val = (valLo & 0x0F) | ((valHi & 0x0F) << 4);*/
 
 							} else
 							{
+								int effectFirstNibble = (pcmd->param / 16);
 								int effectSecondNibble = (pcmd->param - pcmd->param % 16);
-								val = effectSecondNibble + mpt::random<uint32>(theApp.PRNG()) % 16;
-								/*val = vsrc + ((vdest - vsrc) * i + verr) / distance;*/
+								val = max != min ? mpt::random<uint32>(theApp.PRNG()) % (max - min) + min : min;
+								//val += (effectFirstNibble * 16);
+								//this next line is junk
+								val = (effectFirstNibble);
+								std::cout << "first nibble = " << effectFirstNibble << std::endl;
 							}
 							pcmd->param = static_cast<ModCommand::PARAM>(val);
 						}
@@ -7147,13 +7077,14 @@ bool CViewPattern::BuildRandomizationCtxMenu(HMENU hMenu, CInputHandler *ih) con
 
 	HMENU subMenu = CreatePopupMenu();
 	bool addSeparator = false;
-	/*addSeparator |= BuildRandomizationCtxMenu(subMenu, PatternCursor::noteColumn, ih->GetKeyTextFromCommand(kcPatternRandomizeNote, _T("&Note Column")), ID_PATTERN_RANDOMIZE_NOTE);
-	addSeparator |= BuildRandomizationCtxMenu(subMenu, PatternCursor::instrColumn, ih->GetKeyTextFromCommand(kcPatternRandomizeInstr, isPCNote ? _T("&Plugin Column") : _T("&Instrument Column")), ID_PATTERN_RANDOMIZE_INSTR);*/
+	addSeparator |= BuildRandomizationCtxMenu(subMenu, PatternCursor::noteColumn, ih->GetKeyTextFromCommand(kcPatternRandomizeNote, _T("&Note Column")), ID_PATTERN_RANDOMIZE_NOTE);
+	addSeparator |= BuildRandomizationCtxMenu(subMenu, PatternCursor::instrColumn, ih->GetKeyTextFromCommand(kcPatternRandomizeInstr, isPCNote ? _T("&Plugin Column") : _T("&Instrument Column")), ID_PATTERN_RANDOMIZE_INSTR);
 	addSeparator |= BuildRandomizationCtxMenu(subMenu, PatternCursor::volumeColumn, ih->GetKeyTextFromCommand(kcPatternRandomizeVol, isPCNote ? _T("&Parameter Column") : _T("&Volume Column")), ID_PATTERN_RANDOMIZE_VOLUME);
 	addSeparator |= BuildRandomizationCtxMenu(subMenu, PatternCursor::effectColumn, ih->GetKeyTextFromCommand(kcPatternRandomizeEffect, isPCNote ? _T("&Value Column") : _T("&Effect Column")), ID_PATTERN_RANDOMIZE_EFFECT);
 	if(addSeparator || !(TrackerSettings::Instance().m_dwPatternSetup & PATTERN_OLDCTXMENUSTYLE))
 	{
-		AppendMenu(hMenu, MF_POPUP | (addSeparator ? 0 : MF_GRAYED), reinterpret_cast<UINT_PTR>(subMenu), _T("R&andomize..."));
+		//AppendMenu(hMenu, MF_POPUP | (addSeparator ? 0 : MF_GRAYED), reinterpret_cast<UINT_PTR>(subMenu), _T("R&andomize..."));
+		AppendMenu(hMenu, MF_POPUP | 0, reinterpret_cast<UINT_PTR>(subMenu), _T("R&andomize..."));
 		return true;
 	}
 	return false;
@@ -7179,11 +7110,11 @@ bool CViewPattern::BuildInterpolationCtxMenu(HMENU hMenu, PatternCursor::Columns
 
 bool CViewPattern::BuildRandomizationCtxMenu(HMENU hMenu, PatternCursor::Columns colType, CString label, UINT command) const
 {
-	bool addSeparator = IsInterpolationPossible(colType);
+	bool addSeparator = IsRandomizationPossible(colType);
 	if(!addSeparator && colType == PatternCursor::effectColumn)
 	{
 		// Extend search to param column
-		addSeparator = IsInterpolationPossible(PatternCursor::paramColumn);
+		addSeparator = IsRandomizationPossible(PatternCursor::paramColumn);
 	}
 
 	if(addSeparator || !(TrackerSettings::Instance().m_dwPatternSetup & PATTERN_OLDCTXMENUSTYLE))
@@ -7552,6 +7483,57 @@ bool CViewPattern::IsInterpolationPossible(ROWINDEX startRow, ROWINDEX endRow, C
 
 	default:
 		result = false;
+	}
+	return result;
+}
+
+// Check if the given interpolation type is actually possible in the current selection.
+bool CViewPattern::IsRandomizationPossible(PatternCursor::Columns colType) const
+{
+	std::vector<CHANNELINDEX> validChans;
+	ListChansWhereColSelected(colType, validChans);
+
+	ROWINDEX startRow = m_Selection.GetStartRow();
+	ROWINDEX endRow = m_Selection.GetEndRow();
+	for(auto chn : validChans)
+	{
+		if(IsRandomizationPossible(startRow, endRow, chn, colType))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+
+// Check if the given interpolation type is actually possible in a given channel.
+bool CViewPattern::IsRandomizationPossible(ROWINDEX startRow, ROWINDEX endRow, CHANNELINDEX chan, PatternCursor::Columns colType) const
+{
+	const CSoundFile *sndFile = GetSoundFile();
+	if(sndFile == nullptr || !sndFile->Patterns.IsValidPat(m_nPattern))
+		return false;
+
+	bool result = false;
+	const ModCommand &startRowMC = *sndFile->Patterns[m_nPattern].GetpModCommand(startRow, chan);
+
+	switch(colType)
+	{
+		/* volume column will always be randomizable,
+		* but if there's no command in the first row it will use vXX as default
+		*/
+		case PatternCursor::noteColumn:
+		case PatternCursor::instrColumn:
+		case PatternCursor::volumeColumn:
+			result = true;
+			break;
+
+		case PatternCursor::effectColumn:
+		case PatternCursor::paramColumn:
+			result = startRowMC.command != CMD_NONE;  
+			break;
+
+		default:
+			result = false;
 	}
 	return result;
 }
