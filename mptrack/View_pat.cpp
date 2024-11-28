@@ -2730,7 +2730,7 @@ void CViewPattern::Interpolate(PatternCursor::Columns type)
 }
 
 /*
-	TODO: this is copied from PatternFindReplaceDlg.cpp, refactor this out of both classes
+	TODO: this is copied from PatternFindReplaceDlg.cpp, maybe refactor this out of both classes
 */
 class CRangeDlg : public CDialog
 {
@@ -2817,12 +2817,6 @@ protected:
 			std::swap(m_minVal, m_maxVal);
 	}
 
-	/*
-	void OnCancel() override
-	{
-		CDialog::OnCancel();
-	}
-	*/
 };
 
 
@@ -2890,12 +2884,7 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 				{ return (end.command == start.command || (start.IsNormalVolumeSlide() && end.IsNormalVolumeSlide()) || start.IsPcNote()) && (!start.IsPcNote() || end.IsPcNote()); });
 				break;
 		}
-
-		/*if(sweepSelection.GetNumRows() > 1)
-		{*/
-			// Found usable end and start commands: Extend selection.
 			SetCurSel(sweepSelection);
-		//}
 	}
 
 	//randomization should never depend on last row, but you still need to know distance to loop over the selection
@@ -2904,8 +2893,6 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 	//for all channels where type is selected
 	for(auto nchn : validChans)
 	{
-		//if(!IsInterpolationPossible(row0, row1, nchn, type))
-		//	continue;  //skip chans where interpolation isn't possible
 
 
 		if(!changed)  //ensure we save undo buffer only before any channels are randomized
@@ -2932,7 +2919,7 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 
 		bool doPCinterpolation = false;
 		bool isVolSlide = false;
-		int vsrc, vdest, vcmd = 0, verr = 0, distance = row1 - row0;
+		int vsrc, vcmd = 0, verr = 0, distance = row1 - row0;
 
 		const ModCommand srcCmd = *sndFile->Patterns[m_nPattern].GetpModCommand(row0, nchn);
 
@@ -2991,7 +2978,7 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 					//TODO: typing in numbers only works sorta well when there are two digit numbers
 					bool isPCNote = srcCmd.IsPcNote();
 					int minBound = 0;
-					int maxBound = isPCNote ? 999 : 0xFF;
+					int maxBound = isPCNote ? 999 : (srcCmd.CommandHasTwoNibbles()? 0xF: 0xFF);
 					CRangeDlg::DisplayMode mode = isPCNote ? CRangeDlg::kDecimal : CRangeDlg::kHex;
 
 					CRangeDlg dlg(this, minBound, minBound, maxBound, maxBound, mode);
@@ -3011,7 +2998,7 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 				return;
 		}
 
-		int mask = -1;
+		int effectMask = -1;
 		switch(type)
 		{
 			case PatternCursor::noteColumn:
@@ -3034,17 +3021,8 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 					vcmd = srcCmd.command;
 					isVolSlide = srcCmd.IsNormalVolumeSlide();
 					if (srcCmd.CommandHasTwoNibbles()) {
-						mask = srcCmd.param / 16;
+						effectMask = srcCmd.param / 16;
 					}
-					/*if(srcCmd.command == CMD_NONE)
-					{
-						vsrc = vdest;
-						vcmd = destCmd.command;
-						isVolSlide = destCmd.IsNormalVolumeSlide();
-					} else if(destCmd.command == CMD_NONE)
-					{
-						vdest = vsrc;
-					}*/
 				}
 				verr = (distance * 63) / 128;
 				break;
@@ -3054,13 +3032,6 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 				return;
 		}
 
-		/*const int srcLo = (vsrc & 0x0F), destLo = (vdest & 0x0F);
-		const int srcHi = (vsrc >> 4), destHi = (vdest >> 4);
-		const int verrLo = (srcLo < destLo) ? verr : -verr;
-		const int verrHi = (srcHi < destHi) ? verr : -verr;
-
-		if(vdest < vsrc)
-			verr = -verr;*/
 
 		/*
 		* Create dialog window to specify range. Only has two parameters which are the same for
@@ -3086,29 +3057,15 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 					break;
 
 				case PatternCursor::instrColumn:
-					/*if(pcmd->instr == 0)
-					{*/
-					/*int instr = vsrc + ((vdest - vsrc) * i + verr) / distance;
-						pcmd->instr = static_cast<ModCommand::INSTR>(instr);*/
-
-					//todo: see if i can get the number of instruments/samples in the module from this file,
-					//but this will become somewhat irrelevant once i implement range dialog
-					//uint32 instr = mpt::random<uint32>(theApp.PRNG()) % 64;
 					{
 						uint32 instr = max != min ? mpt::random<uint32>(theApp.PRNG()) % (max - min) + min : min;
 						pcmd->instr = static_cast<ModCommand::VOL>(instr);
 					}
-
-					//}
 					break;
 
 				case PatternCursor::volumeColumn:
 					if((pcmd->volcmd == VOLCMD_NONE || pcmd->volcmd == vcmd) && !pcmd->IsPcNote())
 					{
-						/*int vol = vsrc + ((vdest - vsrc) * i + verr) / distance;
-						pcmd->vol = static_cast<ModCommand::VOL>(vol);
-						pcmd->volcmd = static_cast<ModCommand::VOLCMD>(vcmd);*/
-						//uint32 vol = mpt::random<uint32>(theApp.PRNG())%64;
 						uint32 vol = max != min ? mpt::random<uint32>(theApp.PRNG()) % (max - min) + min : min;
 						pcmd->vol = static_cast<ModCommand::VOL>(vol);
 						pcmd->volcmd = static_cast<ModCommand::VOLCMD>(vcmd);
@@ -3119,10 +3076,7 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 					if(doPCinterpolation)
 					{  // With PC/PCs notes, copy PCs note and plug index to all rows where
 						// effect interpolation is done if no PC note with non-zero instrument is there.
-						//const uint16 val = static_cast<uint16>(vsrc + ((vdest - vsrc) * i + verr) / distance);
 						uint32 val;
-						/*if(pcmd->IsPcNote() || pcmd->instr == 0)
-						{*/
 						pcmd->note = PCnote;
 						pcmd->instr = static_cast<ModCommand::INSTR>(PCinst);
 						val = max != min ? mpt::random<uint32>(theApp.PRNG()) % (max - min) + min : min;
@@ -3138,20 +3092,14 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 							int val;
 							if(!pcmd->CommandHasTwoNibbles())
 							{
-								//val = mpt::random<uint32>(theApp.PRNG()) % 256;
 								val = max != min ? mpt::random<uint32>(theApp.PRNG()) % (max - min) + min : min;
-								/*const int valLo = srcLo + ((destLo - srcLo) * i + verrLo) / distance;
-								const int valHi = srcHi + ((destHi - srcHi) * i + verrHi) / distance;
-								val = (valLo & 0x0F) | ((valHi & 0x0F) << 4);*/
 
 							} else
 							{
 								int effectFirstNibble = (pcmd->param / 16);
 								int effectSecondNibble = (pcmd->param - pcmd->param % 16);
 								val = max != min ? mpt::random<uint32>(theApp.PRNG()) % (max - min) + min : min;
-								val += (mask * 16);
-								//this next line is junk
-								std::cout << "first nibble = " << effectFirstNibble << std::endl;
+								val += (effectMask * 16);
 							}
 							pcmd->param = static_cast<ModCommand::PARAM>(val);
 						}
