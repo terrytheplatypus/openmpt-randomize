@@ -3011,6 +3011,7 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 				return;
 		}
 
+		int mask = -1;
 		switch(type)
 		{
 			case PatternCursor::noteColumn:
@@ -3032,6 +3033,9 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 					vsrc = srcCmd.param;
 					vcmd = srcCmd.command;
 					isVolSlide = srcCmd.IsNormalVolumeSlide();
+					if (srcCmd.CommandHasTwoNibbles()) {
+						mask = srcCmd.param / 16;
+					}
 					/*if(srcCmd.command == CMD_NONE)
 					{
 						vsrc = vdest;
@@ -3082,18 +3086,20 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 					break;
 
 				case PatternCursor::instrColumn:
-					if(pcmd->instr == 0)
-					{
-						/*int instr = vsrc + ((vdest - vsrc) * i + verr) / distance;
+					/*if(pcmd->instr == 0)
+					{*/
+					/*int instr = vsrc + ((vdest - vsrc) * i + verr) / distance;
 						pcmd->instr = static_cast<ModCommand::INSTR>(instr);*/
 
-						//todo: see if i can get the number of instruments/samples in the module from this file,
-						//but this will become somewhat irrelevant once i implement range dialog
-						//uint32 instr = mpt::random<uint32>(theApp.PRNG()) % 64;
+					//todo: see if i can get the number of instruments/samples in the module from this file,
+					//but this will become somewhat irrelevant once i implement range dialog
+					//uint32 instr = mpt::random<uint32>(theApp.PRNG()) % 64;
+					{
 						uint32 instr = max != min ? mpt::random<uint32>(theApp.PRNG()) % (max - min) + min : min;
 						pcmd->instr = static_cast<ModCommand::VOL>(instr);
-
 					}
+
+					//}
 					break;
 
 				case PatternCursor::volumeColumn:
@@ -3143,9 +3149,8 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 								int effectFirstNibble = (pcmd->param / 16);
 								int effectSecondNibble = (pcmd->param - pcmd->param % 16);
 								val = max != min ? mpt::random<uint32>(theApp.PRNG()) % (max - min) + min : min;
-								//val += (effectFirstNibble * 16);
+								val += (mask * 16);
 								//this next line is junk
-								val = (effectFirstNibble);
 								std::cout << "first nibble = " << effectFirstNibble << std::endl;
 							}
 							pcmd->param = static_cast<ModCommand::PARAM>(val);
