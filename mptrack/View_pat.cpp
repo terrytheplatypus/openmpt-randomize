@@ -3082,8 +3082,7 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 					break;
 
 				case PatternCursor::volumeColumn:
-					std::cout << "volume debug 1" << std::endl;
-					//if((pcmd->volcmd == VOLCMD_NONE || pcmd->volcmd == vcmd) && !pcmd->IsPcNote())
+					if((pcmd->volcmd == VOLCMD_NONE || pcmd->volcmd == vcmd) && !pcmd->IsPcNote())
 					{
 						uint32 vol = max != min ? mpt::random<uint32>(theApp.PRNG()) % (max - min) + min : min;
 						pcmd->vol = static_cast<ModCommand::VOL>(vol);
