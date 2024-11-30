@@ -2918,7 +2918,7 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 			PrepareUndo(m_Selection, description);
 		}
 
-		bool doPCinterpolation = false;
+		bool doPCrandomization = false;
 		bool isVolSlide = false;
 		int vsrc, vcmd = 0, verr = 0, distance = row1 - row0;
 
@@ -2928,6 +2928,11 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 		uint16 PCinst = 0, PCparam = 0;
 
 		int max = 0, min = 0;
+
+		
+		EffectInfo info = EffectInfo(*sndFile);
+
+		boolean hasSingleNibbleRange = false;
 
 		switch(type)
 		{
@@ -2981,9 +2986,15 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 					bool isPCNote = srcCmd.IsPcNote();
 					int minBound = 0;
 
-					//int maxBound = isPCNote ? 999 : (srcCmd.CommandHasTwoNibbles()? 0xF: 0xFF);
-					EffectInfo info = EffectInfo(*sndFile);
-					int maxBound = isPCNote ? 999 : (info.IsExtendedEffect(info.GetIndexFromEffect(srcCmd.command, srcCmd.param)) ? 0xF : 0xFF);
+					/*
+						todo:
+						GetIndexFromEffect checks for extended effects (Sxy in .it/Exy in .xm),
+						but this also needs to check for finetune (EFx, EEx, FFx, FEx), tempo (T1x, T0x) and
+						similar stuff in .xm (Xxy), where it's best if only the 2nd nibble of the param is randomized
+					*/
+					hasSingleNibbleRange = info.IsExtendedEffect(info.GetIndexFromEffect(srcCmd.command, srcCmd.param));
+					
+					int maxBound = isPCNote ? 999 : (hasSingleNibbleRange ? 0xF : 0xFF);
 					CRangeDlg::DisplayMode mode = isPCNote ? CRangeDlg::kDecimal : CRangeDlg::kHex;
 
 					CRangeDlg dlg(this, minBound, minBound, maxBound, maxBound, mode);
@@ -3009,13 +3020,15 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 			case PatternCursor::noteColumn:
 			case PatternCursor::instrColumn:
 			case PatternCursor::volumeColumn:
+				vsrc = srcCmd.vol;
+				vcmd = srcCmd.volcmd;
 				break;
 
 			case PatternCursor::paramColumn:
 			case PatternCursor::effectColumn:
 				if(srcCmd.IsPcNote())
 				{
-					doPCinterpolation = true;
+					doPCrandomization = true;
 					PCnote = srcCmd.note;
 					vsrc = srcCmd.GetValueEffectCol();
 					PCparam = srcCmd.GetValueVolCol();
@@ -3069,7 +3082,8 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 					break;
 
 				case PatternCursor::volumeColumn:
-					if((pcmd->volcmd == VOLCMD_NONE || pcmd->volcmd == vcmd) && !pcmd->IsPcNote())
+					std::cout << "volume debug 1" << std::endl;
+					//if((pcmd->volcmd == VOLCMD_NONE || pcmd->volcmd == vcmd) && !pcmd->IsPcNote())
 					{
 						uint32 vol = max != min ? mpt::random<uint32>(theApp.PRNG()) % (max - min) + min : min;
 						pcmd->vol = static_cast<ModCommand::VOL>(vol);
@@ -3078,7 +3092,7 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 					break;
 
 				case PatternCursor::effectColumn:
-					if(doPCinterpolation)
+					if(doPCrandomization)
 					{  // With PC/PCs notes, copy PCs note and plug index to all rows where
 						// effect interpolation is done if no PC note with non-zero instrument is there.
 						uint32 val;
