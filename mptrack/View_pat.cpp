@@ -3038,7 +3038,8 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 					vsrc = srcCmd.param;
 					vcmd = srcCmd.command;
 					isVolSlide = srcCmd.IsNormalVolumeSlide();
-					if (srcCmd.CommandHasTwoNibbles()) {
+					if(hasSingleNibbleRange)
+					{
 						effectMask = srcCmd.param / 16;
 					}
 				}
@@ -3050,13 +3051,6 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 				return;
 		}
 
-
-		/*
-		* Create dialog window to specify range. Only has two parameters which are the same for
-		* each randomization option (max and min) but these have to have different upper bounds and
-		* different format for each type. for volume, it should be decimal number with two digits,
-		* for volume column effects it's at most 9, for 
-		*/
 
 		ModCommand *pcmd = sndFile->Patterns[m_nPattern].GetpModCommand(row0, nchn);
 
@@ -3108,7 +3102,7 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 							if(!isVolSlide || !pcmd->IsNormalVolumeSlide())
 								pcmd->command = static_cast<ModCommand::COMMAND>(vcmd);
 							int val;
-							if(!pcmd->CommandHasTwoNibbles())
+							if(!hasSingleNibbleRange)
 							{
 								val = max != min ? mpt::random<uint32>(theApp.PRNG()) % (max - min) + min : min;
 
