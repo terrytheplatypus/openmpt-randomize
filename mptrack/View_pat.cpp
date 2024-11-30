@@ -32,6 +32,7 @@
 #include "../soundlib/MIDIEvents.h"
 #include "../soundlib/mod_specifications.h"
 #include "../soundlib/plugins/PlugInterface.h"
+#include "../mptrack/EffectInfo.h"
 
 #include <algorithm>
 
@@ -2961,7 +2962,8 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 			case PatternCursor::volumeColumn:
 				{
 					//TODO: make proper range if there is a volume effect
-					CRangeDlg dlg(this, 0, 0, 64, 64, CRangeDlg::kDecimal);
+					int maxBound = srcCmd.volcmd == VOLCMD_VOLUME?64:9;
+					CRangeDlg dlg(this, 0, 0, maxBound, maxBound, CRangeDlg::kDecimal);
 					if(dlg.DoModal() == IDOK)
 					{
 						min = dlg.GetMinVal();
@@ -2978,7 +2980,10 @@ void CViewPattern::Randomize(PatternCursor::Columns type)
 					//TODO: typing in numbers only works sorta well when there are two digit numbers
 					bool isPCNote = srcCmd.IsPcNote();
 					int minBound = 0;
-					int maxBound = isPCNote ? 999 : (srcCmd.CommandHasTwoNibbles()? 0xF: 0xFF);
+
+					//int maxBound = isPCNote ? 999 : (srcCmd.CommandHasTwoNibbles()? 0xF: 0xFF);
+					EffectInfo info = EffectInfo(*sndFile);
+					int maxBound = isPCNote ? 999 : (info.IsExtendedEffect(info.GetIndexFromEffect(srcCmd.command, srcCmd.param)) ? 0xF : 0xFF);
 					CRangeDlg::DisplayMode mode = isPCNote ? CRangeDlg::kDecimal : CRangeDlg::kHex;
 
 					CRangeDlg dlg(this, minBound, minBound, maxBound, maxBound, mode);
